@@ -1,5 +1,5 @@
 [elk]
-172.25.138.172
+<elastic-server-ip>
 
 [elk-client]
-172.25.138.163
+<filebeat-vm-ip>
