@@ -1,0 +1,116 @@
+---
+#
+# Install/run logstash
+#
+
+- name: Copy logstash yum repo file
+  copy:
+    src=logstash.repo
+    dest=/etc/yum.repos.d/logstash.repo
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Import logstash GPG Key
+  rpm_key: key=http://artifacts.elastic.co/GPG-KEY-elasticsearch
+    state=present
+  become: true
+
+- name: Install logstash rpms
+  yum: name=logstash state=present
+  become: true
+
+- name: Copy logstash input filters
+  copy:
+    src=01-lumberjack-input.conf
+    dest=/etc/logstash/conf.d/01-lumberjack-input.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Copy logstash output filters
+  copy:
+    src=30-elasticsearch-output.conf
+    dest=/etc/logstash/conf.d/30-lumberjack-output.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Copy logstash syslog filters
+  copy:
+    src=10-syslog.conf
+    dest=/etc/logstash/conf.d/10-syslog.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Copy logstash local syslog filter
+  copy:
+    src=10-syslog-filter.conf
+    dest=/etc/logstash/conf.d/10-syslog-filter.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+  register: logstash_needs_restart
+
+- name: Copy filebeat input filter
+  template:
+    src=02-beats-input.conf.j2
+    dest=/etc/logstash/conf.d/02-beats-input.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Load OpenSSL CA Extended Configuration
+  template:
+    src=openssl_extras.cnf.j2
+    dest=/etc/pki/tls/openssl_extras.cnf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+- name: Check OpenSSL SANs (SubjectAltName) entry for CA
+  shell: grep "{{ ansible_default_ipv4.address }}" /etc/pki/tls/openssl.cnf | wc -l
+  ignore_errors: true
+  register: subjectAltName_exists
+  tags:
+    # Skip ANSIBLE0012 Commands should not change things if nothing needs doing
+    # Need to understand if an entry exists
+    - skip_ansible_lint
+
+- name: Add OpenSSL SANs (SubjectAltName) entry for CA
+  lineinfile:
+    dest: /etc/pki/tls/openssl.cnf
+    line: 'subjectAltName = "{{ ansible_default_ipv4.address }}"'
+    regexp: '^ Extensions for a typical CA'
+    insertbefore: '# Extensions for a typical CA'
+    backup: yes
+  when: subjectAltName_exists.stdout|int == 0
+
+- name: RedHat/CentOS - Install pip
+  command: bash -c "curl https://bootstrap.pypa.io/get-pip.py | python -"
+  become: true
+
+- name: Install httplib2
+  pip: name=httplib2
+  become: true
+
+- name: Load filebeat JSON index template
+  uri:
+    url: http://localhost:9200/_template/filebeat?pretty
+    method: POST
+    body: "{{ lookup('file', 'filebeat-index-template.json') }}"
+    body_format: json
+  ignore_errors: true
+  become: true
+
+- name: Enable logstash service
+  service: name=logstash state=started enabled=true
+  become: true

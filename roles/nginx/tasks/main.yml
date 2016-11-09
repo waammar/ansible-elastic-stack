@@ -1,0 +1,68 @@
+---
+#
+# Install/run nginx
+#
+
+- name: Check/Install EPEL Repo for nginx
+  yum: name={{epel_repo}}
+      state=present
+  become: true
+
+- name: Install nginx, httpd-tools, httplib2, libsemanage-python
+  yum: name={{ item }} state=present
+  become: true
+  with_items:
+    - nginx
+    - httpd-tools
+    - python-httplib2
+    - libsemanage-python
+
+# SELinux boolean for nginx
+# - name: Apply SELinux boolean httpd_can_network_connect
+#   seboolean: name=httpd_can_network_connect state=yes persistent=yes
+
+# create /etc/nginx/conf.d/ directory
+- name: Create nginx directory structure
+  file: path=/etc/nginx/conf.d/
+    state=directory
+    mode=0755
+  become: true
+
+# deploy kibana.conf with FQDN
+- name: Setup nginx reverse proxy for kibana
+  template:
+    src=kibana.conf.j2
+    dest=/etc/nginx/conf.d/kibana.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+  register: nginx_needs_restart
+
+# deploy basic nginx.conf 8080 vhost
+- name: Setup nginx TCP/8080 vhost for SSL certificate
+  template:
+    src=nginx.conf.j2
+    dest=/etc/nginx/nginx.conf
+    owner=root
+    group=root
+    mode=0644
+  become: true
+
+# start nginx service
+- name: Start nginx service
+  command: systemctl restart nginx.service
+  ignore_errors: true
+  when: nginx_needs_restart != 0
+  become: true
+
+- name: Check if nginx is in use
+  shell: systemctl is-enabled nginx.service | egrep -qv 'masked|disabled'
+  register: nginx_in_use
+  ignore_errors: yes
+  become: true
+
+- name: Set nginx to start on boot
+  command: systemctl enable nginx.service
+  ignore_errors: true
+  when: nginx_in_use.rc != 0
